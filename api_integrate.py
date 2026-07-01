@@ -6,50 +6,52 @@ import time
 from sklearn.ensemble import RandomForestClassifier
 
 
-# CONFIGURATION
+# 1. CONFIGURATION
 
+# Mapping codes used by football-data.org
 TARGET_COMPETITIONS = {
-    "World Cup": {"id": "1", "neutral_venues": True},
-    "Premier League": {"id": "39", "neutral_venues": False},
-    "La Liga": {"id": "140", "neutral_venues": False}
+    "World Cup": {"code": "WC", "neutral_venues": True},
+    "Premier League": {"code": "PL", "neutral_venues": False},
+    "La Liga": {"code": "PD", "neutral_venues": False}
 }
 
-SEASON = "2026"
-API_KEY = userdata.get('APISPORTS_KEY')
+TOKEN = userdata.get('footdata_key')
+HEADERS = {'X-Auth-Token': TOKEN}
+BASE_URL = "https://api.football-data.org/v4"
 
 
-# DATA INGESTION FUNCTIONS
-def fetch_competition_data(api_key, league_id, comp_name, is_neutral, season, upcoming_only):
-    url = "https://v3.football.api-sports.io/fixtures"
-    headers = {"x-apisports-key": api_key}
-    
-    if upcoming_only:
-        querystring = {"league": league_id, "season": season, "next": "10"}
-    else:
-        querystring = {"league": league_id, "season": season, "last": "60"} 
-        
-    response = requests.get(url, headers=headers, params=querystring)
-    if response.status_code != 200: return pd.DataFrame()
-        
+# 2. DATA INGESTION FUNCTIONS
+
+def get_data(endpoint):
+    response = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS)
+    return response.json() if response.status_code == 200 else {}
+
+def fetch_matches(code, upcoming_only=False):
+    """Fetches matches and extracts relevant fields."""
+    status = "SCHEDULED" if upcoming_only else "FINISHED"
+    data = get_data(f"/competitions/{code}/matches?status={status}")
     matches = []
-    for item in response.json().get("response", []):
+    
+    for item in data.get("matches", []):
         matches.append({
-            "fixture_id": item["fixture"]["id"],
-            "match_date": item["fixture"]["date"],
-            "competition": comp_name,
-            "home_team": item["teams"]["home"]["name"],
-            "away_team": item["teams"]["away"]["name"],
-            "is_neutral_venue": int(is_neutral),
-            "home_goals": item["goals"]["home"],
-            "away_goals": item["goals"]["away"]
+            "match_date": item["utcDate"],
+            "home_team": item["homeTeam"]["name"],
+            "away_team": item["awayTeam"]["name"],
+            "home_goals": item["score"]["fullTime"]["home"] if item["score"]["fullTime"]["home"] is not None else 0,
+            "away_goals": item["score"]["fullTime"]["away"] if item["score"]["fullTime"]["away"] is not None else 0
         })
     return pd.DataFrame(matches)
 
-def get_mock_standings(teams):
-    
-    unique_teams = list(set(teams))
-    # Randomly assign a rank to each team to simulate last year's table
-    ranks = np.random.permutation(len(unique_teams)) + 1 
-    return dict(zip(unique_teams, ranks))
-
-
+def get_real_standings(code):
+    """Fetches real standings/form from the API."""
+    data = get_data(f"/competitions/{code}/standings")
+    standings_map = {}
+    if 'standings' in data:
+        for table in data['standings']:
+            if table['type'] == 'TOTAL':
+                for pos in table['table']:
+                    # Create a score: 3 for W, 1 for D, 0 for L
+                    form_str = pos.get('form', '') or ""
+                    score = sum([3 if c == 'W' else 1 if c == 'D' else 0 for c in form_str.split(',')]) / 15
+                    standings_map[pos['team']['name']] = {'rank': pos['position'], 'form': score}
+    return standings_map
