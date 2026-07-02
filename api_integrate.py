@@ -26,10 +26,30 @@ def get_data(endpoint):
     response = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS)
     return response.json() if response.status_code == 200 else {}
 
-def fetch_matches(code, upcoming_only=False):
-    """Fetches matches and extracts relevant fields."""
+
+#added a labelling
+def label_match(row):
+   #labelling
+    if row['home_goals'] > row['away_goals']:
+        return 2  # Home Win
+    elif row['home_goals'] == row['away_goals']:
+        return 1  # Draw
+    else:
+        return 0  # Away Win
+
+def fetch_matches(code, season, upcoming_only=False):
+    """Fetches matches for a specific season using the retry logic."""
     status = "SCHEDULED" if upcoming_only else "FINISHED"
-    data = get_data(f"/competitions/{code}/matches?status={status}")
+    url = f"{BASE_URL}/competitions/{code}/matches?status={status}&season={season}"
+    
+    # Using the new retry helper
+    response = fetch_with_retry(url, HEADERS)
+    
+    # Check if the response is valid
+    if response is None or response.status_code != 200:
+        return pd.DataFrame()
+        
+    data = response.json()
     matches = []
     
     for item in data.get("matches", []):
@@ -40,18 +60,28 @@ def fetch_matches(code, upcoming_only=False):
             "home_goals": item["score"]["fullTime"]["home"] if item["score"]["fullTime"]["home"] is not None else 0,
             "away_goals": item["score"]["fullTime"]["away"] if item["score"]["fullTime"]["away"] is not None else 0
         })
-    return pd.DataFrame(matches)
+    df = pd.DataFrame(matches)
 
-def get_real_standings(code):
-    """Fetches real standings/form from the API."""
-    data = get_data(f"/competitions/{code}/standings")
+    if not df.empty:
+        df['match_result'] = df.apply(label_match, axis=1)
+        
+    return df
+
+
+def get_real_standings(code, season=2025):
+    """Fetches standings for a specific season."""
+    # Update the URL to include the season parameter
+    data = get_data(f"/competitions/{code}/standings?season={season}")
     standings_map = {}
+    
     if 'standings' in data:
         for table in data['standings']:
             if table['type'] == 'TOTAL':
                 for pos in table['table']:
-                    # Create a score: 3 for W, 1 for D, 0 for L
                     form_str = pos.get('form', '') or ""
-                    score = sum([3 if c == 'W' else 1 if c == 'D' else 0 for c in form_str.split(',')]) / 15
+                    # Ensure you handle the case where form_str is empty
+                    scores = [3 if c == 'W' else 1 if c == 'D' else 0 for c in form_str.split(',')]
+                    # Use length of scores to avoid division by zero if no form data
+                    score = sum(scores) / len(scores) if scores else 0.5
                     standings_map[pos['team']['name']] = {'rank': pos['position'], 'form': score}
     return standings_map
