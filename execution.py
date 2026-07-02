@@ -4,32 +4,43 @@
 historical_dfs = []
 all_standings = {}
 
-print(" Phase 1: Ingesting Data from football-data.org ")
+print("--- Phase 3: Processing Matches with Form Differential ---")
 for comp_name, config in TARGET_COMPETITIONS.items():
-    print(f"Fetching {comp_name}...")
-    # Get historical data
-    df = fetch_matches(config["code"], upcoming_only=False)
-    df['competition'] = comp_name
-    df['is_neutral_venue'] = int(config["neutral_venues"])
-    historical_dfs.append(df)
+    print(f"Processing {comp_name}...")
     
-    # Get real standings and form
-    all_standings.update(get_real_standings(config["code"]))
-    time.sleep(1) # Pacing
+    # Get standings for both Home and Away lookup
+    standings_map = get_real_standings(config["code"])
+    all_standings.update(standings_map)
+    
+    # Get matches
+    df = fetch_matches(config["code"], upcoming_only=False)
+    if not df.empty:
+        df['competition'] = comp_name
+        df['is_neutral_venue'] = int(config["neutral_venues"])
+        
+        # ADDED: Map both home AND away form/rank
+        df['home_rank'] = df['home_team'].apply(lambda x: standings_map.get(x, {}).get('rank', 10))
+        df['away_rank'] = df['away_team'].apply(lambda x: standings_map.get(x, {}).get('rank', 10))
+        df['home_form'] = df['home_team'].apply(lambda x: standings_map.get(x, {}).get('form', 0.5))
+        df['away_form'] = df['away_team'].apply(lambda x: standings_map.get(x, {}).get('form', 0.5))
+        
+        # ENGINEERED FEATURE: Form Differential (Higher = Home Team is in better form)
+        df['form_diff'] = df['home_form'] - df['away_form']
+        
+        # Target: Home Win
+        df['home_win'] = (df['home_goals'] > df['away_goals']).astype(float)
+        historical_dfs.append(df)
+    
+    time.sleep(1) # API Pacing
 
 master_history = pd.concat(historical_dfs, ignore_index=True)
-
-# Apply engineering using real API data
-master_history['home_rank'] = master_history['home_team'].apply(lambda x: all_standings.get(x, {}).get('rank', 10))
-master_history['home_form'] = master_history['home_team'].apply(lambda x: all_standings.get(x, {}).get('form', 0.5))
-master_history['home_win'] = (master_history['home_goals'] > master_history['away_goals']).astype(float)
-
-
 # 4. TRAINING & PREDICTION (Simplified)
 
-FEATURES = ['home_form', 'home_rank', 'is_neutral_venue']
-X_train = master_history[FEATURES].fillna(0.5)
-y_train = master_history['home_win']
+FEATURES = ['form_diff', 'home_rank', 'away_rank', 'is_neutral_venue']
 
-model = RandomForestClassifier(n_estimators=100).fit(X_train, y_train)
-print("Pipeline trained on real football-data.org standings!")
+X = master_history[FEATURES].fillna(0.5)
+y = master_history['home_win']
+
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X, y)
+print("Model trained on Form Differential and Relative Ranking!")
