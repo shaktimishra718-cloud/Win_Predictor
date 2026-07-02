@@ -46,4 +46,4 @@ X = master_history[FEATURES].fillna(0.5)
 y = master_history['home_win']
 
 model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X, y
+model.fit(X, y)
