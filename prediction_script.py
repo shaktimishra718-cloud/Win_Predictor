@@ -9,13 +9,22 @@ upcoming_matches = []
 
 for comp_name, config in TARGET_COMPETITIONS.items():
     current_season = max(config["seasons"]) # Always predict for the latest season
+    previous_season = current_season - 1    # Fallback season
+    
     print(f"Fetching SCHEDULED matches for {comp_name} (Season {current_season})...")
     
-    # Notice: upcoming_only=True
     df = fetch_matches(config["code"], season=current_season, upcoming_only=True)
     
     if not df.empty:
+        # 1. Fetch current standings
         standings_map = get_real_standings(config["code"], season=current_season)
+        
+        # 🚨 THE FIX: Cross-Season Warm-Up
+        is_brand_new_season = len(standings_map) == 0 or all(v.get('form') == 0.5 or not v.get('form') for v in standings_map.values())
+        
+        if is_brand_new_season:
+            print(f"   ⚠️ Season {current_season} has no history yet. Priming form features with final Season {previous_season} data...")
+            standings_map = get_real_standings(config["code"], season=previous_season)
         
         df['competition'] = comp_name
         df['season'] = current_season
@@ -46,19 +55,21 @@ if upcoming_matches:
     combined_timeline['match_date'] = pd.to_datetime(combined_timeline['match_date'])
     combined_timeline = combined_timeline.sort_values('match_date').reset_index(drop=True)
     
+    # Run the feature engineering!
     combined_timeline = compute_h2h_and_fatigue(combined_timeline, h2h_n=5, default_rest_days=7)
     
     # Extract only the future matches back out
     inference_data = combined_timeline[combined_timeline['is_future'] == True].copy()
+    
+    # Drop rows where we couldn't calculate features
     inference_data = inference_data.dropna(subset=FEATURES)
     
     if not inference_data.empty:
         print(f"✅ Successfully engineered features for {len(inference_data)} upcoming matches!\n")
         
-        # Isolate the exact features the model was trained on
         X_infer = inference_data[FEATURES]
         
-        # THE PREDICTION: We use predict_proba to get the % confidence, not just a binary 1 or 0
+        # THE PREDICTION
         probabilities = model_temporal.predict_proba(X_infer)
         
         inference_data['prob_away_draw'] = probabilities[:, 0]
@@ -81,7 +92,6 @@ if upcoming_matches:
             p_home = row['prob_home_win'] * 100
             p_away_draw = row['prob_away_draw'] * 100
             
-            # Formatting the output based on model confidence
             if p_home > 50:
                 prediction = f"HOME WIN ({home})"
                 confidence = p_home
@@ -95,7 +105,7 @@ if upcoming_matches:
             print(f"{home} vs {away}")
             print(f"{symbol} Prediction: {prediction} (Confidence: {confidence:.1f}%)")
             
-            # Show the human why the model made this choice
+            # Show the human why the model made this choice (Notice Form Diff is no longer 0.00!)
             print(f"   ↳ Form Diff: {row['form_diff']:.2f} | Rest Diff: {row['fatigue_diff']} days | H2H Home Win Rate: {row['h2h_home_win_rate']*100:.0f}%")
             print("-" * 73)
             
