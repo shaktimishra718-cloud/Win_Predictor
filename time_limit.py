@@ -1,3 +1,5 @@
+import time
+import requests
 def fetch_with_retry(url, headers, max_retries=5):
     """Fetches data with automatic backoff for 429 errors."""
     for i in range(max_retries):
