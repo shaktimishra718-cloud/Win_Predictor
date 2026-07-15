@@ -1,3 +1,2 @@
 .env
-*.joblib
 __pycache__/

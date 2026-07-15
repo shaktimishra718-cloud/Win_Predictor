@@ -38,7 +38,7 @@ api_key = os.getenv('FOOTBALL_API_KEY')
 HEADERS = {'X-Auth-Token': api_key}
 BASE_URL = "https://api.football-data.org/v4"
 REQUESTS_PER_MINUTE = 10
-SLEEP_TIME = (60 / REQUESTS_PER_MINUTE) + 1
+SLEEP_TIME = 7
 
 # 2. DATA INGESTION FUNCTIONS
 

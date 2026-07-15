@@ -2,21 +2,18 @@ import os
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-# Load variables from the .env file
+# Load variables from the local .env file (if running locally)
 load_dotenv()
 
-# Build the connection string
-# Format: postgresql://username:password@host:port/database
-db_user = os.getenv('DB_USER')
-db_pass = os.getenv('DB_PASS')
-db_host = os.getenv('DB_HOST', 'localhost')
-db_port = os.getenv('DB_PORT', '5432')
-db_name = os.getenv('DB_NAME')
-
-DB_URL = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+# Securely grab the single Neon connection string
+DB_URL = os.getenv('DATABASE_URL')
 
 def get_engine():
     """Creates and returns the SQLAlchemy engine."""
+    if not DB_URL:
+        print("❌ DATABASE_URL environment variable is missing!")
+        return None
+        
     try:
         engine = create_engine(DB_URL)
         return engine
@@ -30,7 +27,7 @@ def test_connection():
     if engine:
         try:
             with engine.connect() as connection:
-                print("✅ Connection established successfully!")
+                print("✅ Connection established successfully to the Cloud Database!")
         except Exception as e:
             print(f"❌ Connection failed: {e}")
     else:
